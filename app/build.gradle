@@ -24,6 +24,8 @@ android {
             applicationIdSuffix ".beta"
         }
         release {
+            minifyEnabled
+            shrinkResources
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }
@@ -33,6 +35,9 @@ android {
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_11
         targetCompatibility JavaVersion.VERSION_11
+    }
+        lintOptions {
+        checkReleaseBuilds false
     }
     kotlinOptions {
         jvmTarget = '11'
@@ -63,8 +68,7 @@ dependencies {
 
 //    FireBase
     implementation platform('com.google.firebase:firebase-bom:30.2.0')
-    implementation 'com.google.firebase:firebase-analytics-ktx'
-    implementation 'com.google.firebase:firebase-crashlytics-ktx'
+    implementation("com.google.android.gms:play-services-base:18.0.1")
 
 //    Exoplayer
     implementation 'com.google.android.exoplayer:exoplayer-core:2.18.0'
