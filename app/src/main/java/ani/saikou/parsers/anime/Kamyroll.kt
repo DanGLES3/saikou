@@ -1,10 +1,9 @@
 package ani.saikou.parsers.anime
 
-import ani.saikou.FileUrl
-import ani.saikou.client
-import ani.saikou.levenshtein
+import ani.saikou.*
 import ani.saikou.media.Media
 import ani.saikou.parsers.*
+import ani.saikou.settings.PlayerSettings
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
@@ -35,7 +34,7 @@ class Kamyroll : AnimeParser() {
                 val series: MutableMap<String, String> = mutableMapOf()
             )
 
-            val epMap = mutableMapOf<Long, Temp>()
+            val epMap = mutableMapOf<Float, Temp>()
             val dataList = (eps.items ?: return listOf()).mapNotNull { item ->
                 val tit = item.title ?: return@mapNotNull null
                 (item.episodes ?: return@mapNotNull null).map {
@@ -58,7 +57,7 @@ class Kamyroll : AnimeParser() {
             epMap.map {
                 if (it.value.thumb != null)
                     Episode(
-                        it.key.toString(),
+                        it.key.toString().replace(".0",""),
                         it.value.type,
                         it.value.title,
                         it.value.thumb!!,
@@ -208,9 +207,21 @@ class Kamyroll : AnimeParser() {
     }
 
     companion object {
+        private val player = "player_settings"
+        val settings = loadData<PlayerSettings>(player, toast = false) ?: PlayerSettings().apply { saveData(player, this) }
+        private val locale = when(settings.locale) {
+            0 -> "en-US"
+            1 -> "es-ES"
+            2 -> "pt-PT"
+            3 -> "pt-BR"
+            4 -> "fr-FR"
+            5 -> "de-DE"
+            6 -> "ar-ME"
+            7 -> "ru-RU"
+            else -> "en-US"
+        }
         private const val apiUrl = "https://kamyroll.herokuapp.com"
         private const val channel = "crunchyroll"
-        private const val locale = "en-US"
         private const val service = "google"
 
         private var headers: Map<String, String>? = null
@@ -275,12 +286,12 @@ class Kamyroll : AnimeParser() {
         @SerialName("type") val type: String,
 
         @SerialName("season_number")
-        val seasonNumber: Long? = null,
+        val seasonNumber: Float? = null,
 
         @SerialName("episode") val episode: String? = null,
 
         @SerialName("sequence_number")
-        val sequenceNumber: Long,
+        val sequenceNumber: Float,
 
         @SerialName("title")
         val title: String? = null,
