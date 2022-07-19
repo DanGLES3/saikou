@@ -24,6 +24,8 @@ android {
             applicationIdSuffix ".beta"
         }
         release {
+            minifyEnabled
+            shrinkResources
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }
