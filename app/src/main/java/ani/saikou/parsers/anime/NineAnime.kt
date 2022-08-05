@@ -24,7 +24,6 @@ class NineAnime : AnimeParser() {
     override val isDubAvailableSeparately = true
 
     override suspend fun loadEpisodes(animeLink: String, extra: Map<String, String>?): List<Episode> {
-        println(animeLink)
         val animeId = client.get(animeLink).document.select("#watch-main").attr("data-id")
         val body = client.get("${host()}/ajax/episode/list/$animeId?vrf=${encodeVrf(animeId)}").parsed<Response>().result
         return Jsoup.parse(body).body().select("ul > li > a").mapNotNull {
@@ -122,27 +121,21 @@ class NineAnime : AnimeParser() {
 
 
     companion object {
-        private const val defaultHost = "9anime.pl"
-        private var host: String? = null
-        suspend fun host(): String {
-            host =
-                if (host != null) host ?: defaultHost
-                else {
-                    client.get("https://raw.githubusercontent.com/saikou-app/mal-id-filler-list/main/nine.txt")
-                        .text.replace("\n", "")
-                }
-            return "https://$host"
+        private const val defaultHost = "9anime.id"
+        fun host(): String {
+            return "https://$defaultHost"
         }
 
         private const val nineAnimeKey = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-        private const val cipherKey = "rTKp3auwu0ULA6II"
+        private const val cipherKey = "oZH6q4X4VAIHk0Ol"
+        private const val decipherKey = "hlPeNwkncH0fq9so" // Thanks to the community
 
         private fun encodeVrf(text: String): String {
-            return encode(encrypt(cipher(cipherKey, encode(text)), nineAnimeKey).replace("""=+$""".toRegex(), ""))
+            return encode(encrypt(cipher(cipherKey, encode(text)), nineAnimeKey))
         }
 
         private fun decodeVrf(text: String): String {
-            return decode(cipher(cipherKey, decrypt(text, nineAnimeKey)))
+            return decode(cipher(decipherKey, decrypt(text, nineAnimeKey)))
         }
 
         fun encrypt(input: String, key: String): String {
