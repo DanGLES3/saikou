@@ -5,6 +5,7 @@ import android.annotation.SuppressLint
 import android.app.AlertDialog
 import android.app.Dialog
 import android.app.PictureInPictureParams
+import android.app.PictureInPictureUiState
 import android.content.ActivityNotFoundException
 import android.content.ComponentName
 import android.content.Intent
@@ -45,9 +46,12 @@ import ani.saikou.anilist.Anilist
 import ani.saikou.databinding.ActivityExoplayerBinding
 import ani.saikou.media.Media
 import ani.saikou.media.MediaDetailsViewModel
+import ani.saikou.others.AniSkip
+import ani.saikou.others.AniSkip.getType
 import ani.saikou.others.ResettableTimer
 import ani.saikou.parsers.*
 import ani.saikou.settings.PlayerSettings
+import ani.saikou.settings.PlayerSettingsActivity
 import ani.saikou.settings.UserInterfaceSettings
 import com.bumptech.glide.Glide
 import com.google.android.exoplayer2.*
@@ -95,17 +99,24 @@ class ExoplayerView : AppCompatActivity(), Player.Listener {
     private lateinit var playerView: StyledPlayerView
     private lateinit var exoPlay: ImageButton
     private lateinit var exoSource: ImageButton
+    private lateinit var exoSettings: ImageButton
+    private lateinit var exoSubtitle: ImageButton
     private lateinit var exoRotate: ImageButton
     private lateinit var exoQuality: ImageButton
     private lateinit var exoSpeed: ImageButton
     private lateinit var exoScreen: ImageButton
     private lateinit var exoNext: ImageButton
     private lateinit var exoPrev: ImageButton
+    private lateinit var exoSkipOpEd: ImageButton
     private lateinit var exoPip: ImageButton
     private lateinit var exoBrightness: Slider
     private lateinit var exoVolume: Slider
     private lateinit var exoBrightnessCont: View
     private lateinit var exoVolumeCont: View
+    private lateinit var exoSkip: View
+    private lateinit var skipTimeButton: View
+    private lateinit var skipTimeText: TextView
+    private lateinit var timeStampText: TextView
     private lateinit var animeTitle: TextView
     private lateinit var videoName: TextView
     private lateinit var videoInfo: TextView
@@ -140,11 +151,13 @@ class ExoplayerView : AppCompatActivity(), Player.Listener {
     private var pipEnabled = false
     private var aspectRatio = Rational(16, 9)
 
-    private var settings = PlayerSettings()
+    var settings = PlayerSettings()
     private var uiSettings = UserInterfaceSettings()
 
     private val handler = Handler(Looper.getMainLooper())
-    private val model: MediaDetailsViewModel by viewModels()
+    val model: MediaDetailsViewModel by viewModels()
+
+    private var isTimeStampsLoaded = false
 
     var rotation = 0
 
@@ -186,66 +199,7 @@ class ExoplayerView : AppCompatActivity(), Player.Listener {
         }
     }
 
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        binding = ActivityExoplayerBinding.inflate(layoutInflater)
-        setContentView(binding.root)
-
-        //Initialize
-        WindowCompat.setDecorFitsSystemWindows(window, false)
-        hideSystemBars()
-
-        settings = loadData("player_settings") ?: PlayerSettings().apply { saveData("player_settings", this) }
-        uiSettings = loadData("ui_settings") ?: UserInterfaceSettings().apply { saveData("ui_settings", this) }
-
-        playerView = findViewById(R.id.player_view)
-        exoQuality = playerView.findViewById(R.id.exo_quality)
-        exoPlay = playerView.findViewById(R.id.exo_play)
-        exoSource = playerView.findViewById(R.id.exo_source)
-        exoRotate = playerView.findViewById(R.id.exo_rotate)
-        exoSpeed = playerView.findViewById(R.id.exo_playback_speed)
-        exoScreen = playerView.findViewById(R.id.exo_screen)
-        exoBrightness = playerView.findViewById(R.id.exo_brightness)
-        exoVolume = playerView.findViewById(R.id.exo_volume)
-        exoBrightnessCont = playerView.findViewById(R.id.exo_brightness_cont)
-        exoVolumeCont = playerView.findViewById(R.id.exo_volume_cont)
-        exoPip = playerView.findViewById(R.id.exo_pip)
-
-        animeTitle = playerView.findViewById(R.id.exo_anime_title)
-        episodeTitle = playerView.findViewById(R.id.exo_ep_sel)
-
-        playerView.controllerShowTimeoutMs = 5000
-
-        val audioManager = applicationContext.getSystemService(AUDIO_SERVICE) as AudioManager
-
-        @Suppress("DEPRECATION")
-        audioManager.requestAudioFocus({ focus ->
-            when (focus) {
-                AUDIOFOCUS_LOSS_TRANSIENT, AUDIOFOCUS_LOSS -> if(isInitialized) exoPlayer.pause()
-                AUDIOFOCUS_GAIN                            -> if(isInitialized) exoPlayer.play()
-            }
-        }, AUDIO_CONTENT_TYPE_MOVIE, AUDIOFOCUS_GAIN)
-
-        if (System.getInt(contentResolver, System.ACCELEROMETER_ROTATION, 0) != 1) {
-            requestedOrientation = rotation
-            exoRotate.setOnClickListener {
-                requestedOrientation = rotation
-                it.visibility = View.GONE
-            }
-            orientationListener = object : OrientationEventListener(this, SensorManager.SENSOR_DELAY_UI) {
-                override fun onOrientationChanged(orientation: Int) {
-                    if (orientation in 45..135) {
-                        if (rotation != ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE) exoRotate.visibility = View.VISIBLE
-                        rotation = ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
-                    } else if (orientation in 225..315) {
-                        if (rotation != ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE) exoRotate.visibility = View.VISIBLE
-                        rotation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
-                    }
-                }
-            }
-            orientationListener?.enable()
-        }
-
+    private fun setupSubFormatting(playerView: StyledPlayerView, settings: PlayerSettings) {
         val primaryColor = when (settings.primaryColor) {
             0    -> Color.BLACK
             1    -> Color.DKGRAY
@@ -283,6 +237,36 @@ class ExoplayerView : AppCompatActivity(), Player.Listener {
             3    -> EDGE_TYPE_NONE // No outline
             else -> EDGE_TYPE_OUTLINE // Normal
         }
+        val subBackground = when (settings.subBackground) {
+            0    -> Color.TRANSPARENT
+            1    -> Color.BLACK
+            2    -> Color.DKGRAY
+            3    -> Color.GRAY
+            4    -> Color.LTGRAY
+            5    -> Color.WHITE
+            6    -> Color.RED
+            7    -> Color.YELLOW
+            8    -> Color.GREEN
+            9    -> Color.CYAN
+            10   -> Color.BLUE
+            11   -> Color.MAGENTA
+            else -> Color.TRANSPARENT
+        }
+        val subWindow = when (settings.subWindow) {
+            0    -> Color.TRANSPARENT
+            1    -> Color.BLACK
+            2    -> Color.DKGRAY
+            3    -> Color.GRAY
+            4    -> Color.LTGRAY
+            5    -> Color.WHITE
+            6    -> Color.RED
+            7    -> Color.YELLOW
+            8    -> Color.GREEN
+            9    -> Color.CYAN
+            10   -> Color.BLUE
+            11   -> Color.MAGENTA
+            else -> Color.TRANSPARENT
+        }
         val font = when (settings.font) {
             0    -> ResourcesCompat.getFont(this, R.font.poppins_semi_bold)
             1    -> ResourcesCompat.getFont(this, R.font.poppins_bold)
@@ -290,17 +274,91 @@ class ExoplayerView : AppCompatActivity(), Player.Listener {
             3    -> ResourcesCompat.getFont(this, R.font.poppins_thin)
             else -> ResourcesCompat.getFont(this, R.font.poppins_semi_bold)
         }
-
         playerView.subtitleView?.setStyle(
             CaptionStyleCompat(
                 primaryColor,
-                Color.TRANSPARENT,
-                Color.TRANSPARENT,
+                subBackground,
+                subWindow,
                 outline,
                 secondaryColor,
                 font
             )
         )
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        binding = ActivityExoplayerBinding.inflate(layoutInflater)
+        setContentView(binding.root)
+
+        //Initialize
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        hideSystemBars()
+
+        settings = loadData("player_settings") ?: PlayerSettings().apply { saveData("player_settings", this) }
+        uiSettings = loadData("ui_settings") ?: UserInterfaceSettings().apply { saveData("ui_settings", this) }
+
+        playerView = findViewById(R.id.player_view)
+        exoQuality = playerView.findViewById(R.id.exo_quality)
+        exoPlay = playerView.findViewById(R.id.exo_play)
+        exoSource = playerView.findViewById(R.id.exo_source)
+        exoSettings = playerView.findViewById(R.id.exo_settings)
+        exoSubtitle = playerView.findViewById(R.id.exo_sub)
+        exoRotate = playerView.findViewById(R.id.exo_rotate)
+        exoSpeed = playerView.findViewById(R.id.exo_playback_speed)
+        exoScreen = playerView.findViewById(R.id.exo_screen)
+        exoBrightness = playerView.findViewById(R.id.exo_brightness)
+        exoVolume = playerView.findViewById(R.id.exo_volume)
+        exoBrightnessCont = playerView.findViewById(R.id.exo_brightness_cont)
+        exoVolumeCont = playerView.findViewById(R.id.exo_volume_cont)
+        exoPip = playerView.findViewById(R.id.exo_pip)
+        exoSkipOpEd = playerView.findViewById(R.id.exo_skip_op_ed)
+        exoSkip = playerView.findViewById(R.id.exo_skip)
+        skipTimeButton = playerView.findViewById(R.id.exo_skip_timestamp)
+        skipTimeText = skipTimeButton.findViewById(R.id.exo_skip_timestamp_text)
+        timeStampText = playerView.findViewById(R.id.exo_time_stamp_text)
+
+        animeTitle = playerView.findViewById(R.id.exo_anime_title)
+        episodeTitle = playerView.findViewById(R.id.exo_ep_sel)
+
+        playerView.controllerShowTimeoutMs = 5000
+
+        val audioManager = applicationContext.getSystemService(AUDIO_SERVICE) as AudioManager
+
+        @Suppress("DEPRECATION")
+        audioManager.requestAudioFocus({ focus ->
+            when (focus) {
+                AUDIOFOCUS_LOSS_TRANSIENT, AUDIOFOCUS_LOSS -> if (isInitialized) exoPlayer.pause()
+            }
+        }, AUDIO_CONTENT_TYPE_MOVIE, AUDIOFOCUS_GAIN)
+
+        if (System.getInt(contentResolver, System.ACCELEROMETER_ROTATION, 0) != 1) {
+            requestedOrientation = rotation
+            exoRotate.setOnClickListener {
+                requestedOrientation = rotation
+                it.visibility = View.GONE
+            }
+            orientationListener = object : OrientationEventListener(this, SensorManager.SENSOR_DELAY_UI) {
+                override fun onOrientationChanged(orientation: Int) {
+                    if (orientation in 45..135) {
+                        if (rotation != ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE) exoRotate.visibility = View.VISIBLE
+                        rotation = ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
+                    } else if (orientation in 225..315) {
+                        if (rotation != ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE) exoRotate.visibility = View.VISIBLE
+                        rotation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+                    }
+                }
+            }
+            orientationListener?.enable()
+        }
+
+        setupSubFormatting(playerView, settings)
+
+
+        playerView.subtitleView?.alpha = when (settings.subtitles) {
+            true  -> 1f
+            false -> 0f
+        }
         val fontSize = settings.fontSize.toFloat()
         playerView.subtitleView?.setFixedTextSize(TypedValue.COMPLEX_UNIT_SP, fontSize)
 
@@ -314,6 +372,34 @@ class ExoplayerView : AppCompatActivity(), Player.Listener {
         //BackButton
         playerView.findViewById<ImageButton>(R.id.exo_back).setOnClickListener {
             onBackPressed()
+        }
+
+        //TimeStamps
+        model.timeStamps.observe(this) { it ->
+            isTimeStampsLoaded = true
+            exoSkipOpEd.visibility = if (it != null) {
+                val adGroups = it.flatMap {
+                    listOf(it.interval.startTime.toLong() * 1000, it.interval.endTime.toLong() * 1000)
+                }.toLongArray()
+                val playedAdGroups = it.flatMap {
+                    listOf(false, false)
+                }.toBooleanArray()
+                playerView.setExtraAdGroupMarkers(adGroups, playedAdGroups)
+                View.VISIBLE
+            } else View.GONE
+        }
+
+        exoSkipOpEd.alpha = if (settings.autoSkipOPED) 1f else 0.3f
+        exoSkipOpEd.setOnClickListener {
+            settings.autoSkipOPED = if (settings.autoSkipOPED) {
+                toastString("Disabled Auto Skipping OP & ED")
+                false
+            } else {
+                toastString("Auto Skipping OP & ED")
+                true
+            }
+            saveData("player_settings", settings)
+            exoSkipOpEd.alpha = if (settings.autoSkipOPED) 1f else 0.3f
         }
 
         //Play Pause
@@ -366,12 +452,12 @@ class ExoplayerView : AppCompatActivity(), Player.Listener {
 
         //Skip Time Button
         if (settings.skipTime > 0) {
-            playerView.findViewById<TextView>(R.id.exo_skip_time).text = settings.skipTime.toString()
-            playerView.findViewById<View>(R.id.exo_skip).setOnClickListener {
+            exoSkip.findViewById<TextView>(R.id.exo_skip_time).text = settings.skipTime.toString()
+            exoSkip.setOnClickListener {
                 if (isInitialized)
                     exoPlayer.seekTo(exoPlayer.currentPosition + settings.skipTime * 1000)
             }
-            playerView.findViewById<View>(R.id.exo_skip).setOnLongClickListener {
+            exoSkip.setOnLongClickListener {
                 val dialog = Dialog(this, R.style.DialogTheme)
                 dialog.setContentView(R.layout.item_seekbar_dialog)
                 dialog.setCancelable(true)
@@ -405,7 +491,7 @@ class ExoplayerView : AppCompatActivity(), Player.Listener {
                 true
             }
         } else {
-            playerView.findViewById<View>(R.id.exo_skip).visibility = View.GONE
+            exoSkip.visibility = View.GONE
         }
 
         val gestureSpeed = (300 * uiSettings.animationSpeed).toLong()
@@ -473,43 +559,62 @@ class ExoplayerView : AppCompatActivity(), Player.Listener {
         val fastForwardCard = playerView.findViewById<View>(R.id.exo_fast_forward)
         val fastRewindCard = playerView.findViewById<View>(R.id.exo_fast_rewind)
 
+
+        //Seeking
+        val seekTimerF = ResettableTimer()
+        val seekTimerR = ResettableTimer()
+        var seekTimesF = 0
+        var seekTimesR = 0
+
+        fun seek(forward: Boolean, event: MotionEvent? = null) {
+            val views = if (forward) {
+                forwardText.text = "+${settings.seekTime * ++seekTimesF}"
+                handler.post { exoPlayer.seekTo(exoPlayer.currentPosition + settings.seekTime * 1000) }
+                fastForwardCard to forwardText
+            } else {
+                rewindText.text = "-${settings.seekTime * ++seekTimesR}"
+                handler.post { exoPlayer.seekTo(exoPlayer.currentPosition - settings.seekTime * 1000) }
+                fastRewindCard to rewindText
+            }
+            startDoubleTapped(views.first, views.second, event, forward)
+            if (forward) {
+                seekTimerR.reset(object : TimerTask() {
+                    override fun run() {
+                        stopDoubleTapped(views.first, views.second)
+                        seekTimesF = 0
+                    }
+                }, 850)
+            } else {
+                seekTimerF.reset(object : TimerTask() {
+                    override fun run() {
+                        stopDoubleTapped(views.first, views.second)
+                        seekTimesR = 0
+                    }
+                }, 850)
+            }
+        }
+
+        if (!settings.doubleTap) {
+            playerView.findViewById<View>(R.id.exo_fast_forward_button_cont).visibility = View.VISIBLE
+            playerView.findViewById<View>(R.id.exo_fast_rewind_button_cont).visibility = View.VISIBLE
+            playerView.findViewById<ImageButton>(R.id.exo_fast_forward_button).setOnClickListener {
+                if (isInitialized) {
+                    seek(true)
+                }
+            }
+            playerView.findViewById<ImageButton>(R.id.exo_fast_rewind_button).setOnClickListener {
+                if (isInitialized) {
+                    seek(false)
+                }
+            }
+        }
+
         //Screen Gestures
         if (settings.gestures || settings.doubleTap) {
 
-            val seekTimerF = ResettableTimer()
-            val seekTimerR = ResettableTimer()
-            var seekTimesF = 0
-            var seekTimesR = 0
-
-            fun doubleTap(view: View, event: MotionEvent?, text: TextView, dir: Boolean) {
+            fun doubleTap(forward: Boolean, event: MotionEvent?) {
                 if (!locked && isInitialized && settings.doubleTap) {
-                    if (dir) {
-                        text.text = "+${settings.seekTime * ++seekTimesF}"
-                        handler.post { exoPlayer.seekTo(exoPlayer.currentPosition + settings.seekTime * 1000) }
-                    } else {
-                        text.text = "-${settings.seekTime * ++seekTimesR}"
-                        handler.post { exoPlayer.seekTo(exoPlayer.currentPosition - settings.seekTime * 1000) }
-                    }
-                    startDoubleTapped(
-                        view,
-                        event,
-                        text
-                    )
-                    if (dir) {
-                        seekTimerR.reset(object : TimerTask() {
-                            override fun run() {
-                                stopDoubleTapped(view, text)
-                                seekTimesF = 0
-                            }
-                        }, 850)
-                    } else {
-                        seekTimerF.reset(object : TimerTask() {
-                            override fun run() {
-                                stopDoubleTapped(view, text)
-                                seekTimesR = 0
-                            }
-                        }, 850)
-                    }
+                    seek(forward, event)
                 }
             }
 
@@ -537,32 +642,6 @@ class ExoplayerView : AppCompatActivity(), Player.Listener {
                 brightnessHide()
             }
 
-            //FastRewind (Left Panel)
-            val fastRewindDetector = GestureDetector(this, object : GesturesListener() {
-                override fun onDoubleClick(event: MotionEvent?) {
-                    doubleTap(fastRewindCard, event, rewindText, false)
-                }
-
-                override fun onScrollYClick(y: Float) {
-                    if (!locked && settings.gestures) {
-                        exoBrightness.value = clamp(exoBrightness.value + y / 100, 0f, 10f)
-                        if (exoBrightnessCont.visibility != View.VISIBLE) {
-                            exoBrightnessCont.visibility = View.VISIBLE
-                        }
-                        exoBrightnessCont.alpha = 1f
-                    }
-                }
-
-                override fun onSingleClick(event: MotionEvent?) = handleController()
-            })
-            val rewindArea = playerView.findViewById<View>(R.id.exo_rewind_area)
-            rewindArea.isClickable = true
-            rewindArea.setOnTouchListener { v, event ->
-                fastRewindDetector.onTouchEvent(event)
-                v.performClick()
-                true
-            }
-
             //Volume
             var volumeTimer = Timer()
             exoVolumeCont.visibility = View.GONE
@@ -586,10 +665,36 @@ class ExoplayerView : AppCompatActivity(), Player.Listener {
                 volumeHide()
             }
 
+            //FastRewind (Left Panel)
+            val fastRewindDetector = GestureDetector(this, object : GesturesListener() {
+                override fun onDoubleClick(event: MotionEvent?) {
+                    doubleTap(false, event)
+                }
+
+                override fun onScrollYClick(y: Float) {
+                    if (!locked && settings.gestures) {
+                        exoBrightness.value = clamp(exoBrightness.value + y / 100, 0f, 10f)
+                        if (exoBrightnessCont.visibility != View.VISIBLE) {
+                            exoBrightnessCont.visibility = View.VISIBLE
+                        }
+                        exoBrightnessCont.alpha = 1f
+                    }
+                }
+
+                override fun onSingleClick(event: MotionEvent?) = handleController()
+            })
+            val rewindArea = playerView.findViewById<View>(R.id.exo_rewind_area)
+            rewindArea.isClickable = true
+            rewindArea.setOnTouchListener { v, event ->
+                fastRewindDetector.onTouchEvent(event)
+                v.performClick()
+                true
+            }
+
             //FastForward (Right Panel)
             val fastForwardDetector = GestureDetector(this, object : GesturesListener() {
                 override fun onDoubleClick(event: MotionEvent?) {
-                    doubleTap(fastForwardCard, event, forwardText, true)
+                    doubleTap(true, event)
                 }
 
                 override fun onScrollYClick(y: Float) {
@@ -610,24 +715,6 @@ class ExoplayerView : AppCompatActivity(), Player.Listener {
                 fastForwardDetector.onTouchEvent(event)
                 v.performClick()
                 true
-            }
-        }
-
-        if (!settings.doubleTap) {
-
-            playerView.findViewById<View>(R.id.exo_fast_forward_button_cont).visibility = View.VISIBLE
-            playerView.findViewById<View>(R.id.exo_fast_rewind_button_cont).visibility = View.VISIBLE
-            playerView.findViewById<ImageButton>(R.id.exo_fast_forward_button).setOnClickListener {
-                if (isInitialized) {
-                    exoPlayer.seekTo(exoPlayer.currentPosition + settings.seekTime * 1000)
-                    startDoubleTapped(fastForwardCard, text = forwardText)
-                }
-            }
-            playerView.findViewById<ImageButton>(R.id.exo_fast_rewind_button).setOnClickListener {
-                if (isInitialized) {
-                    exoPlayer.seekTo(exoPlayer.currentPosition - settings.seekTime * 1000)
-                    startDoubleTapped(fastRewindCard, text = rewindText)
-                }
             }
         }
 
@@ -683,6 +770,7 @@ class ExoplayerView : AppCompatActivity(), Player.Listener {
                     this
                 )
                 val prev = episodeArr[currentEpisodeIndex]
+                isTimeStampsLoaded = false
                 episodeLength = 0f
                 media.anime!!.selectedEpisode = episodeArr[index]
                 model.setMedia(media)
@@ -780,6 +868,16 @@ class ExoplayerView : AppCompatActivity(), Player.Listener {
             }
         }
 
+        //Settings
+        exoSettings.setOnClickListener {
+            saveData("${media.id}_${media.anime!!.selectedEpisode}", exoPlayer.currentPosition, this)
+            val intent = Intent(this, PlayerSettingsActivity::class.java).apply {
+                putExtra("media", media)
+            }
+            finish()
+            startActivity(intent)
+        }
+
         //Speed
         val speeds =
             if (settings.cursedSpeeds)
@@ -842,12 +940,6 @@ class ExoplayerView : AppCompatActivity(), Player.Listener {
         if (showProgressDialog && Anilist.userid != null && if (media.isAdult) settings.updateForH else true)
             AlertDialog.Builder(this, R.style.DialogTheme).setTitle("Auto Update progress for ${media.userPreferredName}?")
                 .apply {
-                    //                    setMultiChoiceItems(arrayOf("Don't ask again for "), booleanArrayOf(true)) { _, _, isChecked ->
-                    //                        if (isChecked) {
-                    //                            saveData("${media.id}_progressDialog", isChecked)
-                    //                        }
-                    //                        showProgressDialog = isChecked
-                    //                    }
                     setOnCancelListener { hideSystemBars() }
                     setCancelable(false)
                     setPositiveButton("Yes") { dialog, _ ->
@@ -866,6 +958,10 @@ class ExoplayerView : AppCompatActivity(), Player.Listener {
                     show()
                 }
         else model.setEpisode(episodes[media.anime!!.selectedEpisode!!]!!, "invoke")
+
+        //Start the recursive Fun
+        if (settings.timeStampsEnabled)
+            updateTimeStamp()
     }
 
     private fun initPlayer() {
@@ -882,16 +978,45 @@ class ExoplayerView : AppCompatActivity(), Player.Listener {
             extractor?.onVideoStopped(video)
         }
 
-        extractor = episode.extractors?.find { it.server.name == episode.selectedServer } ?: return
-        video = extractor?.videos?.getOrNull(episode.selectedVideo) ?: return
-        subtitle = extractor?.subtitles?.find { it.language == "English" }
+        val ext = episode.extractors?.find { it.server.name == episode.selectedExtractor } ?: return
+        extractor = ext
+        video = ext.videos.getOrNull(episode.selectedVideo) ?: return
+
+        subtitle = ext.subtitles.let { sub ->
+            when (episode.selectedSubtitle) {
+                null -> null
+                -1   -> sub.find { it.language == "English" || it.language == "en-US" }
+                else -> sub.getOrNull(episode.selectedSubtitle!!)
+            }
+        }
+
+        //Subtitles
+        exoSubtitle.visibility = if (ext.subtitles.isNotEmpty()) View.VISIBLE else View.GONE
+        exoSubtitle.setOnClickListener {
+            subClick()
+        }
+
+        val sub = if (subtitle != null)
+            MediaItem.SubtitleConfiguration
+                .Builder(Uri.parse(subtitle!!.url.url))
+                .setSelectionFlags(C.SELECTION_FLAG_FORCED)
+                .setMimeType(
+                    when (subtitle?.type) {
+                        SubtitleType.VTT -> MimeTypes.TEXT_VTT
+                        SubtitleType.ASS -> MimeTypes.TEXT_SSA
+                        SubtitleType.SRT -> MimeTypes.APPLICATION_SUBRIP
+                        else             -> MimeTypes.TEXT_UNKNOWN
+                    }
+                )
+                .build()
+        else null
 
         lifecycleScope.launch(Dispatchers.IO) {
-            extractor?.onVideoPlayed(video)
+            ext.onVideoPlayed(video)
         }
 
         val but = playerView.findViewById<ImageButton>(R.id.exo_download)
-        if (video?.isM3U8 == false) {
+        if (video?.format == VideoType.CONTAINER) {
             but.visibility = View.VISIBLE
             but.setOnClickListener {
                 download(this, episode, animeTitle.text.toString())
@@ -919,22 +1044,14 @@ class ExoplayerView : AppCompatActivity(), Player.Listener {
             setUpstreamDataSourceFactory(dataSourceFactory)
         }
 
-        //Subtitles
-        val sub = if (subtitle != null)
-            MediaItem.SubtitleConfiguration
-                .Builder(Uri.parse(subtitle!!.url.url))
-                .setSelectionFlags(C.SELECTION_FLAG_FORCED)
-                .setMimeType(
-                    when (subtitle?.type) {
-                        "vtt"        -> MimeTypes.TEXT_VTT
-                        "ass", "ssa" -> MimeTypes.TEXT_SSA
-                        else         -> MimeTypes.TEXT_UNKNOWN
-                    }
-                )
-                .build()
-        else null
+        val mimeType = when (video?.format) {
+            VideoType.M3U8 -> MimeTypes.APPLICATION_M3U8
+            VideoType.DASH -> MimeTypes.APPLICATION_MPD
+            else           -> MimeTypes.APPLICATION_MP4
+        }
 
-        val builder = MediaItem.Builder().setUri(video!!.url.url)
+        val builder = MediaItem.Builder().setUri(video!!.url.url).setMimeType(mimeType)
+
         if (sub != null) builder.setSubtitleConfigurations(mutableListOf(sub))
         mediaItem = builder.build()
 
@@ -1042,6 +1159,12 @@ class ExoplayerView : AppCompatActivity(), Player.Listener {
         )
     }
 
+    private fun subClick() {
+        saveData("${media.id}_${media.anime!!.selectedEpisode}", exoPlayer.currentPosition, this)
+        model.saveSelected(media.id, media.selected!!, this)
+        SubtitleDialogFragment().show(supportFragmentManager, "dialog")
+    }
+
     override fun onPause() {
         super.onPause()
         orientationListener?.disable()
@@ -1095,20 +1218,32 @@ class ExoplayerView : AppCompatActivity(), Player.Listener {
         val height = (exoPlayer.videoFormat ?: return).height
         val width = (exoPlayer.videoFormat ?: return).width
 
-        if (video?.isM3U8 == true) {
+        if (video?.format != VideoType.CONTAINER) {
             saveData("maxHeight", height)
             saveData("maxWidth", width)
         }
 
         aspectRatio = Rational(width, height)
 
-        videoName.text = episode.selectedServer
+        videoName.text = episode.selectedExtractor
         videoInfo.text = "$width x $height"
 
         if (exoPlayer.duration < playbackPosition)
             exoPlayer.seekTo(0)
+
+        if (!isTimeStampsLoaded) {
+            val dur = exoPlayer.duration
+            lifecycleScope.launch(Dispatchers.IO) {
+                model.loadTimeStamps(
+                    media.idMAL,
+                    media.anime?.selectedEpisode?.trim()?.toIntOrNull(),
+                    dur / 1000
+                )
+            }
+        }
     }
 
+    //Link Preloading
     private var preloading = false
     private fun updateProgress() {
         if (isInitialized) {
@@ -1129,6 +1264,42 @@ class ExoplayerView : AppCompatActivity(), Player.Listener {
         if (!preloading) handler.postDelayed({
             updateProgress()
         }, 2500)
+    }
+
+    //TimeStamp Updating
+    private var currentTimeStamp: AniSkip.Stamp? = null
+    private var skippedTimeStamps: MutableList<AniSkip.Stamp> = mutableListOf()
+    private fun updateTimeStamp() {
+        if (isInitialized) {
+            val playerCurrentTime = exoPlayer.currentPosition / 1000
+            currentTimeStamp = model.timeStamps.value?.find { timestamp ->
+                timestamp.interval.startTime < playerCurrentTime && playerCurrentTime < (timestamp.interval.endTime - 1)
+            }
+
+            val new = currentTimeStamp
+            timeStampText.text = if (new != null) {
+                if (settings.showTimeStampButton) {
+                    skipTimeButton.visibility = View.VISIBLE
+                    exoSkip.visibility = View.GONE
+                    skipTimeText.text = new.skipType.getType()
+                    skipTimeButton.setOnClickListener {
+                        exoPlayer.seekTo((new.interval.endTime * 1000).toLong())
+                    }
+                }
+                if (settings.autoSkipOPED && (new.skipType == "op" || new.skipType == "ed") && !skippedTimeStamps.contains(new)) {
+                    exoPlayer.seekTo((new.interval.endTime * 1000).toLong())
+                    skippedTimeStamps.add(new)
+                }
+                new.skipType.getType()
+            } else {
+                skipTimeButton.visibility = View.GONE
+                if (settings.skipTime > 0) exoSkip.visibility = View.VISIBLE
+                ""
+            }
+        }
+        handler.postDelayed({
+            updateTimeStamp()
+        }, 500)
     }
 
     override fun onTracksChanged(tracks: Tracks) {
@@ -1237,7 +1408,7 @@ class ExoplayerView : AppCompatActivity(), Player.Listener {
     }
 
     //Double Tap Animation
-    private fun startDoubleTapped(v: View, event: MotionEvent? = null, text: TextView) {
+    private fun startDoubleTapped(v: View, text: TextView, event: MotionEvent? = null, forward: Boolean) {
         ObjectAnimator.ofFloat(text, "alpha", 1f, 1f).setDuration(600).start()
         ObjectAnimator.ofFloat(text, "alpha", 0f, 1f).setDuration(150).start()
 
@@ -1247,18 +1418,16 @@ class ExoplayerView : AppCompatActivity(), Player.Listener {
 
         if (event != null) {
             playerView.hideController()
-            v.circularReveal(event.x.toInt(), event.y.toInt(), 300)
-            ObjectAnimator.ofFloat(v, "alpha", 1f, 1f).setDuration(600).start()
+            v.circularReveal(event.x.toInt(), event.y.toInt(), !forward, 800)
+            ObjectAnimator.ofFloat(v, "alpha", 1f, 1f).setDuration(800).start()
             ObjectAnimator.ofFloat(v, "alpha", 0f, 1f).setDuration(300).start()
         }
     }
 
     private fun stopDoubleTapped(v: View, text: TextView) {
-        v.post {
-            handler.post {
-                ObjectAnimator.ofFloat(v, "alpha", v.alpha, 0f).setDuration(150).start()
-                ObjectAnimator.ofFloat(text, "alpha", 1f, 0f).setDuration(150).start()
-            }
+        handler.post {
+            ObjectAnimator.ofFloat(v, "alpha", v.alpha, 0f).setDuration(150).start()
+            ObjectAnimator.ofFloat(text, "alpha", 1f, 0f).setDuration(150).start()
         }
     }
 
@@ -1270,13 +1439,12 @@ class ExoplayerView : AppCompatActivity(), Player.Listener {
         shareVideo.setPackage("com.instantbits.cast.webvideo")
         if (subtitle != null) shareVideo.putExtra("subtitle", subtitle!!.url.url)
         shareVideo.putExtra("title", media.userPreferredName + " : Ep " + episodeTitleArr[currentEpisodeIndex])
-        shareVideo.putExtra("poster", episode.thumb ?: media.cover)
+        shareVideo.putExtra("poster", episode.thumb?.url ?: media.cover)
         val headers = Bundle()
         video?.url?.headers?.forEach {
             headers.putString(it.key, it.value)
         }
         shareVideo.putExtra("android.media.intent.extra.HTTP_HEADERS", headers)
-        shareVideo.putExtra("headers", headers)
         shareVideo.putExtra("secure_uri", true)
         try {
             startActivity(shareVideo)
@@ -1302,6 +1470,7 @@ class ExoplayerView : AppCompatActivity(), Player.Listener {
                         .build()
                 )
             } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+
                 enterPictureInPictureMode()
             }
         } catch (e: Exception) {
@@ -1309,9 +1478,7 @@ class ExoplayerView : AppCompatActivity(), Player.Listener {
         }
     }
 
-    @Suppress("DEPRECATION")
-    @Deprecated("Deprecated in Java")
-    override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean) {
+    private fun onPiPChanged(isInPictureInPictureMode: Boolean) {
         playerView.useController = !isInPictureInPictureMode
         if (isInPictureInPictureMode) {
             requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
@@ -1323,7 +1490,24 @@ class ExoplayerView : AppCompatActivity(), Player.Listener {
             saveData("${media.id}_${episode.number}", exoPlayer.currentPosition, this)
             exoPlayer.play()
         }
+    }
+
+    @Suppress("DEPRECATION")
+    @Deprecated("Deprecated in Java")
+    override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean) {
+        onPiPChanged(isInPictureInPictureMode)
         super.onPictureInPictureModeChanged(isInPictureInPictureMode)
     }
 
+    @RequiresApi(Build.VERSION_CODES.N)
+    override fun onPictureInPictureUiStateChanged(pipState: PictureInPictureUiState) {
+        onPiPChanged(isInPictureInPictureMode)
+        super.onPictureInPictureUiStateChanged(pipState)
+    }
+
+    @RequiresApi(Build.VERSION_CODES.O)
+    override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
+        onPiPChanged(isInPictureInPictureMode)
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+    }
 }

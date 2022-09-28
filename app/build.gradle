@@ -14,8 +14,8 @@ android {
         applicationId "ani.saikou"
         minSdk 21
         targetSdk 32
-        versionCode 60
-        versionName "1.2.0.19"
+        versionCode 62
+        versionName "1.2.0.22"
         signingConfig signingConfigs.debug
     }
 
@@ -47,8 +47,9 @@ android {
 
 dependencies {
 //    Core
-    implementation 'androidx.appcompat:appcompat:1.5.0'
+    implementation 'androidx.appcompat:appcompat:1.5.1'
     implementation "androidx.browser:browser:1.4.0"
+    //noinspection GradleDependency
     implementation "androidx.core:core-ktx:1.8.0"
     implementation 'androidx.fragment:fragment-ktx:1.5.2'
     implementation 'androidx.swiperefreshlayout:swiperefreshlayout:1.1.0'
@@ -58,7 +59,7 @@ dependencies {
     implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk7:$kotlin_version"
 
     implementation "org.jetbrains.kotlinx:kotlinx-serialization-json:1.3.3"
-    implementation 'com.github.Blatzar:NiceHttp:0.3.2'
+    implementation 'com.github.Blatzar:NiceHttp:0.3.3'
 
 //    Glide
     implementation 'com.github.bumptech.glide:glide:4.13.1'
@@ -74,6 +75,7 @@ dependencies {
     implementation 'com.google.android.exoplayer:exoplayer-core:2.18.1'
     implementation 'com.google.android.exoplayer:exoplayer-ui:2.18.1'
     implementation 'com.google.android.exoplayer:exoplayer-hls:2.18.1'
+    implementation 'com.google.android.exoplayer:exoplayer-dash:2.18.1'
     implementation 'com.google.android.exoplayer:extension-okhttp:2.18.1'
     implementation 'com.google.android.exoplayer:extension-mediasession:2.18.1'
 
