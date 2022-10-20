@@ -64,8 +64,18 @@ class AnimePageAdapter : RecyclerView.Adapter<AnimePageAdapter.AnimePageViewHold
             SettingsDialogFragment().show((it.context as AppCompatActivity).supportFragmentManager, "dialog")
         }
 
-        binding.animeGenreImage.loadImage("https://bit.ly/31bsIHq")
-        binding.animeTopScoreImage.loadImage("https://bit.ly/2ZGfcuG")
+        binding.animeThisSeason.setOnClickListener{
+            onSeasonClick.invoke(1)
+        }
+        binding.animeNextSeason.setOnClickListener{
+            onSeasonClick.invoke(2)
+        }
+        binding.animePreviousSeason.setOnClickListener{
+            onSeasonClick.invoke(0)
+        }
+
+        binding.animeGenreImage.loadImage("https://s4.anilist.co/file/anilistcdn/media/anime/banner/16498-8jpFCOcDmneX.jpg")
+        binding.animeTopScoreImage.loadImage("https://s4.anilist.co/file/anilistcdn/media/anime/banner/125367-hGPJLSNfprO3.jpg")
 
         binding.animeGenre.setOnClickListener {
             ContextCompat.startActivity(
@@ -77,14 +87,23 @@ class AnimePageAdapter : RecyclerView.Adapter<AnimePageAdapter.AnimePageViewHold
         binding.animeTopScore.setOnClickListener {
             ContextCompat.startActivity(
                 it.context,
-                Intent(it.context, SearchActivity::class.java).putExtra("type", "ANIME")
-                    .putExtra("sortBy", "Score"),
+                Intent(it.context, SearchActivity::class.java)
+                    .putExtra("type", "ANIME")
+                    .putExtra("sortBy", "Score")
+                    .putExtra("search", true),
                 null
             )
+        }
+
+        binding.animeIncludeList.setOnCheckedChangeListener { _, isChecked ->
+            onIncludeListClick.invoke(isChecked)
         }
         if (ready.value == false)
             ready.postValue(true)
     }
+
+    lateinit var onSeasonClick : ((Int)->Unit)
+    lateinit var onIncludeListClick : ((Boolean)->Unit)
 
     override fun getItemCount(): Int = 1
 
@@ -116,6 +135,7 @@ class AnimePageAdapter : RecyclerView.Adapter<AnimePageAdapter.AnimePageViewHold
         binding.animeTrendingViewPager.layoutAnimation = LayoutAnimationController(setSlideIn(uiSettings), 0.25f)
         binding.animeTitleContainer.startAnimation(setSlideUp(uiSettings))
         binding.animeListContainer.layoutAnimation = LayoutAnimationController(setSlideIn(uiSettings), 0.25f)
+        binding.animeSeasonsCont.layoutAnimation = LayoutAnimationController(setSlideIn(uiSettings), 0.25f)
     }
 
     fun updateRecent(adaptor: MediaAdaptor) {
